@@ -1,0 +1,431 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Orchestrating an Application Process with AWS Batch using CloudFormation'
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EC2 Security Group for instances launched in the VPC by Batch
+      VpcId:
+        Ref: VPC
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      VpcId:
+        Ref: VPC
+      MapPublicIpOnLaunch: 'True'
+  Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      SubnetId:
+        Ref: Subnet
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: lambda-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+            - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+        - arn:aws:iam::aws:policy/AWSBatchFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+      Path: /
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: batch.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: EcsInstanceRole
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+        - Sid: ''
+          Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+  BatchProcessingJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      Type: container
+      JobDefinitionName: BatchJobDefinition
+      ContainerProperties:
+        Image:
+          Fn::Join:
+          - ''
+          - - Ref: AWS::AccountId
+            - .dkr.ecr.
+            - Ref: AWS::Region
+            - ".amazonaws.com/batch-processing-job-repository:latest"
+        Vcpus: 2
+        Memory: 2000
+        Command:
+        - python 
+        - batch_processor.py
+      RetryStrategy:
+        Attempts: 1
+  BatchProcessingJobQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: BatchProcessingJobQueue
+      Priority: 1
+      ComputeEnvironmentOrder:
+      - Order: 1
+        ComputeEnvironment:
+          Ref: ComputeEnvironment
+  ComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      Type: MANAGED
+      ComputeResources:
+        Type: EC2
+        MinvCpus: 0
+        DesiredvCpus: 0
+        MaxvCpus: 32
+        InstanceTypes:
+        #- a1.medium
+        - optimal
+        Subnets:
+        - Ref: Subnet
+        SecurityGroupIds:
+        - Ref: SecurityGroup
+        InstanceRole:
+          Ref: IamInstanceProfile
+      ServiceRole:
+        Ref: BatchServiceRole
+  BatchProcessS3Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn: BatchProcessBucketPermission
+    Properties: 
+      BucketName: 
+          !Sub 'batch-processing-job-${AWS::AccountId}'
+      NotificationConfiguration:
+        LambdaConfigurations:
+        - Event: 's3:ObjectCreated:*'
+          Function: !GetAtt BatchProcessingLambdaInvokeFunction.Arn
+  BatchProcessBucketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref BatchProcessingLambdaInvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref "AWS::AccountId"
+      SourceArn: !Sub "arn:aws:s3:::batch-processing-job-${AWS::AccountId}"
+  BatchProcessingLambdaInvokeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: BatchProcessingLambdaInvokeFunction
+      Description: Python Function Handler that would be triggered BY s3 events TO the aws batch
+      Handler: index.lambda_handler
+      Runtime: python3.6
+      MemorySize: 128
+      Timeout: 30
+      Role:
+        Fn::GetAtt:
+          - LambdaExecutionRole
+          - Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          def lambda_handler(event, context):
+              inputFileName = ""
+              bucketName = ""
+
+              for record in event['Records']:
+                bucketName = record['s3']['bucket']['name']
+                inputFileName = record['s3']['object']['key'] 
+
+              response = {
+                  'statusCode': 200,
+                  'body': json.dumps('Input Received - ' + json.dumps(event))
+              }
+
+              batch = boto3.client('batch')
+              region = batch.meta.region_name
+
+              batchCommand = "--bucketName " + bucketName  + " --fileName " + inputFileName + " --region " + region
+
+              out = "inputFileName - " + bucketName + "/" + inputFileName + " Region " + region
+              out = out + "  " + batchCommand
+              print(out)
+
+              response = batch.submit_job(jobName='BatchProcessingJobQueue', 
+                                          jobQueue='BatchProcessingJobQueue', 
+                                          jobDefinition='BatchJobDefinition', 
+                                          containerOverrides={
+                                              "command": [ "python", "batch_processor.py", batchCommand  ],
+                                              "environment": [ 
+                                                  {"name": "InputBucket", "value": bucketName},
+                                                  {"name": "FileName", "value": inputFileName},
+                                                  {"name": "Region", "value": region}
+                                              ]
+                                          })
+
+              print("Job ID is {}.".format(response['jobId']))
+              return response  
+
+  #Code Commit
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: batch-processing-job-repo
+      RepositoryDescription: Respository to maintain code related to the Batch Processing Jobs.
+  #Code Build
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: batch-processing-job-build
+      Description: Todo Api application codebuild project.
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+            - Name: REPOSITORY_URI
+              Type: PLAINTEXT
+              Value: 
+                Fn::Join:
+                - ''
+                - - Ref: AWS::AccountId
+                  - .dkr.ecr.
+                  - Ref: AWS::Region
+                  - ".amazonaws.com/batch-processing-job-repository:latest"
+
+            - Name: AWS_DEFAULT_REGION
+              Type: PLAINTEXT
+              Value: 
+                Ref: AWS::Region        
+      Source:
+        BuildSpec: config/buildspec.yml
+        Location: 
+          Fn::Join:
+            - ''
+            - - 'https://git-codecommit.'
+              - Ref: AWS::Region
+              - '.amazonaws.com/v1/repos/'
+              - batch-processing-job-repo
+        Type: CODECOMMIT 
+      SourceVersion: refs/heads/master
+      TimeoutInMinutes: 10 
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess 
+      - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess   
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codebuild.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodeBuildAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 'logs:*'
+                - 'ec2:CreateNetworkInterface'
+                - 'ec2:DescribeNetworkInterfaces'
+                - 'ec2:DeleteNetworkInterface'
+                - 'ec2:DescribeSubnets'
+                - 'ec2:DescribeSecurityGroups'
+                - 'ec2:DescribeDhcpOptions'
+                - 'ec2:DescribeVpcs'
+                - 'ec2:CreateNetworkInterfacePermission'
+                Effect: Allow
+                Resource: '*'
+
+  # CloudWatchEvents Code build Rold            
+  CloudWatchEventsCodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: batch-processing-job-cw-events-codebuild-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+      - PolicyName: aws-events-code-build
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+              - 'codebuild:StartBuild'
+            Resource: !GetAtt CodeBuildProject.Arn              
+  # CloudWatch Event Rule for codecommit build trigger
+  CloudWatchEventCodeBuildEventRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "This event rule triggers the build on code commit event"
+      EventPattern: 
+        source: 
+          - "aws.codecommit"
+        detail-type: 
+          - "CodeCommit Repository State Change"
+        detail: 
+          event: 
+            - "referenceCreated"
+            - "referenceUpdated"
+          referenceType: 
+            - "branch"
+          referenceName: 
+            - "master"                    
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: {'Fn::GetAtt': [CodeBuildProject, Arn]}
+          Id: cloudwatch-codebuild-eventrules  
+          RoleArn: !GetAtt CloudWatchEventsCodeBuildRole.Arn
+
+  BatchProcessRepository: 
+    Type: AWS::ECR::Repository
+    Properties: 
+      RepositoryName: "batch-processing-job-repository"
+      RepositoryPolicyText: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal: 
+              AWS: 
+               - !Sub arn:aws:iam::${AWS::AccountId}:role/${EcsInstanceRole}
+            Action: 
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"
+  
+  BatchProcessingDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: batch-processing-job
+      AttributeDefinitions:
+        -
+          AttributeName: "ProductId"
+          AttributeType: "S"
+        -
+          AttributeName: "ProductName"
+          AttributeType: "S"
+        -
+          AttributeName: "ProductDescription"
+          AttributeType: "S"
+
+          AttributeName: "CreatedTime"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "ProductId"
+          KeyType: "HASH"
+        -
+          AttributeName: "ProductName"
+          KeyType: "RANGE"
+      GlobalSecondaryIndexes:
+        -
+          IndexName: "GSI"
+          KeySchema:
+            -
+              AttributeName: "CreatedTime"
+              KeyType: "HASH"
+          Projection:
+            ProjectionType: "KEYS_ONLY"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+       
+Outputs:
+  ComputeEnvironmentArn:
+    Value:
+      Ref: ComputeEnvironment
+  BatchProcessingJobQueueArn:
+    Value:
+      Ref: BatchProcessingJobQueue
+  BatchProcessingJobDefinitionArn:
+    Value:
+      Ref: BatchProcessingJobDefinition
+  BucketName:
+    Value:
+      Ref: BatchProcessS3Bucket
+  LambdaName:
+    Value:
+      Ref: BatchProcessingLambdaInvokeFunction
