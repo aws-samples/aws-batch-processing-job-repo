@@ -27,51 +27,57 @@ The sample provided spins up an application orchestration using AWS Services lik
 
 ### Steps
 
-1. Git clone/fork the this repository - We will refer this as SOURCE_REPOSITORY
-
-'''
-  $ git clone https://<url>//batch-processing-job-repo
-'''
-
-2. Execute the below command to spin up the infrastructure cloudformation stack. This stack spins up all the necessary AWS infrastructure needed for this exercise
+1. Download this repository - We will refer this as SOURCE_REPOSITORY
 
 ```
-$ cd batch-processing-job-repo
+  $ git clone https://github.com/aws-samples/aws-batch-processing-job-repo
+```
+
+2. Execute the below commands to spin up the infrastructure cloudformation stack. This stack spins up all the necessary AWS infrastructure needed for this exercise
+
+```
+$ cd aws-batch-processing-job-repo
 
 $ aws cloudformation create-stack --stack-name batch-processing-job --template-body file://template/template.yaml --capabilities CAPABILITY_NAMED_IAM
 ```
 
 3. You can run the application in two different ways
 
-a. CI/CD implementation. 
-    - # This steps allows you to copy the contents from source git repo and trigger deployment into your repository
-    - The above command would have created a git repository in your personal account
-    - $ git clone <URL>
-    - cd batch-processing-job-repo
-    - copy all the contents from SOURCE_REPOSITORY (from step 1) and paste inside this folder
-    - $ git add .
-    - $ git commit -m "commit from source"
-    - $ git push 
+    *  #### CI/CD implementation. 
 
-b. Build and run from local desktop. Containarize the provided python file and push it to the Amazon ECR. Dockerfile provided as part of this exercise.
+        ##### This steps allows you to copy the contents from source git repo and trigger deployment into your repository
+            * The above command would have created a git repository in your personal account. Make sure to replace your region below accordingly
+            * $ git clone https://git-codecommit.us-east-1.amazonaws.com/v1/repos/batch-processing-job-repo
+            * cd batch-processing-job-repo
+            * copy all the contents from SOURCE_REPOSITORY (from step 1) and paste inside this folder
+            * $ git add .
+            * $ git commit -m "commit from source"
+            * $ git push 
 
-RUN the below commands to dockerize the python file 
-    - Make sure to replace your account number, region accordingly
-    - Make sure to have Docker daemon running in your local computer
+    * #### Build and run from local desktop. 
     
-    ```
-    $ cd SOURCE_REPOSITORY (Refer step 1)
-    $ cd src
+        ##### Containarize the provided python file and push it to the Amazon ECR. Dockerfile provided as part of this exercise. In this steps you push the code (provided as part of this exercise) to the repository that was built as part of CloudFormation stack
 
-    # get the login creds and copy the below output and paste/run on the command line
-    $ $ aws ecr get-login --region us-east-1 --no-include-email
+    * RUN the below commands to dockerize the python file 
 
-    # Build the docker image locally, tag and push it to the repository
-    $ $ docker build -t batch_processor .
-    $ docker tag batch_processor <YOUR_ACCOUNT_NUMBER>.dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
-    $ docker push <YOUR_ACCOUNT_NUMBER>.dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
+        i. Make sure to replace your account number, region accordingly
 
-    ```
+        ii. Make sure to have Docker daemon running in your local computer
+        
+        
+        ```
+        $ cd SOURCE_REPOSITORY (Refer step 1)
+        $ cd src
+
+        # get the login creds and copy the below output and paste/run on the command line
+        $ $ aws ecr get-login --region us-east-1 --no-include-email
+
+        # Build the docker image locally, tag and push it to the repository
+        $ $ docker build -t batch_processor .
+        $ docker tag batch_processor <YOUR_ACCOUNT_NUMBER>.dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
+        $ docker push <YOUR_ACCOUNT_NUMBER>.dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
+
+        ```
 
 ### Testing
 
