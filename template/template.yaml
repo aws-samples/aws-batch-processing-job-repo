@@ -387,7 +387,7 @@ Resources:
         -
           AttributeName: "ProductDescription"
           AttributeType: "S"
-
+        -
           AttributeName: "CreatedTime"
           AttributeType: "S"
       KeySchema:
