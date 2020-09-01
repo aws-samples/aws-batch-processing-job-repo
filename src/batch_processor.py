@@ -145,7 +145,7 @@ def main():
             parser.add_argument("--region", "-js", type=str, required=True)
             args = parser.parse_args()
 
-            inputJson = args.bucketName
+            inputBucket = args.bucketName
             fileName = args.fileName
             region = args.region
             
