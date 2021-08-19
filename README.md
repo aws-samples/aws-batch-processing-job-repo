@@ -70,12 +70,12 @@ $ aws cloudformation create-stack --stack-name batch-processing-job --template-b
         $ cd src
 
         # get the login creds and copy the below output and paste/run on the command line
-        $ $ aws ecr get-login --region us-east-1 --no-include-email
+        $ aws ecr get-login --region us-east-1 --no-include-email
 
         # Build the docker image locally, tag and push it to the repository
-        $ $ docker build -t batch_processor .
-        $ docker tag batch_processor <YOUR_ACCOUNT_NUMBER>.dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
-        $ docker push <YOUR_ACCOUNT_NUMBER>.dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
+        $ docker build -t batch_processor .
+        $ docker tag batch_processor $(aws sts get-caller-identity --query 'Account' --output text).dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
+        $ docker push $(aws sts get-caller-identity --query 'Account' --output text).dkr.ecr.us-east-1.amazonaws.com/batch-processing-job-repository
 
         ```
 
@@ -85,6 +85,10 @@ Make sure to complete the above step. You can review the image in AWS Console > 
 
 1. AWS S3 bucket - batch-processing-job-<YOUR_ACCOUNT_NUMBER> is created as part of the stack.
 2. Drop the provided Sample.CSV into the S3 bucket. This will trigger the Lambda to trigger the AWS Batch
+
+    ```
+    aws s3 cp sample/sample.csv s3://batch-processing-job-$(aws sts get-caller-identity --query 'Account' --output text)
+    ```
 3. In AWS Console > Batch, Notice the Job runs and performs the operation based on the pushed container image. The job parses the CSV file and adds each row into DynamoDB.
 4. In AWS Console > DynamoDB, look for "batch-processing-job" table. Note sample products provided as part of the CSV is added by the batch
 
