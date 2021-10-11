@@ -17,13 +17,15 @@ LOGTYPE_INFO = 'INFO'
 LOGTYPE_DEBUG = 'DEBUG'
 
 # table - batch_processing_job
-def batch_processing_job_update(productId, productName, productDescription, fileName, region):
+def batch_processing_job_update(productId, productName, productDescription, fileName, region, dbTableName):
     try:
         now = datetime.now()
         date_time = now.strftime("%m-%d-%Y %H:%M:%S.%f")[:-3]
         
         dynamodb = boto3.resource('dynamodb', region_name = region)
-        table = dynamodb.Table(DB_TABLE)
+
+        logMessage(fileName, "dbTableName - " + dbTableName, LOGTYPE_INFO) 
+        table = dynamodb.Table(dbTableName)
         
         table.put_item(
             Item={
@@ -39,7 +41,7 @@ def batch_processing_job_update(productId, productName, productDescription, file
     except Exception as ex:
         logMessage(fileName, "Error Updating DynamoDB:" + str(ex), LOGTYPE_ERROR)
 
-def read_file(fileName, inputBucket, inputFile, s3):
+def read_file(fileName, inputBucket, inputFile, s3, dbTableName):
     input_products = []
     logMessage(fileName, 'Reading file - ' + inputBucket + "/" + inputFile, LOGTYPE_INFO)
     productId = ""
@@ -70,7 +72,7 @@ def read_file(fileName, inputBucket, inputFile, s3):
 
     return input_products
 
-def batch_process(input_products, fileName, region):
+def batch_process(input_products, fileName, region, dbTableName):
 
     try:
         for source_products in input_products:
@@ -79,15 +81,15 @@ def batch_process(input_products, fileName, region):
             productName = str(source_products['productName'])
             productDescription = str(source_products['productDescription'])
             
-            print(str(productIndex) +" " + productId + "  " + productName + "  " + productDescription + "  " + fileName) 
-            batch_processing_job_update(productId, productName, productDescription, fileName, region) 
+            print(str(productIndex) +" " + productId + "  " + productName + "  " + productDescription + "  " + fileName + " " + dbTableName) 
+            batch_processing_job_update(productId, productName, productDescription, fileName, region, dbTableName) 
             logMessage(fileName, "Product updated for " + productId + " and " + productName + " with "+ productDescription, LOGTYPE_INFO)
 
     except Exception as ex:
-        logMessage(fileName, "Error batch processing files" + str(ex), LOGTYPE_ERROR)
+        logMessage(fileName, "Error batch processing files " + str(ex), LOGTYPE_ERROR)
 
 
-def process_files(inputBucket, fileName, region):
+def process_files(inputBucket, fileName, region, dbTableName):
     try:
         urllib3.disable_warnings()
         s3 = boto3.resource('s3', verify=False)
@@ -105,10 +107,10 @@ def process_files(inputBucket, fileName, region):
             
             if isCSVFile:
                 FilesNotFound = False
-                input_products = read_file(fileName, inputBucket, files.key, s3)
+                input_products = read_file(fileName, inputBucket, files.key, s3, dbTableName)
                 
                 if len(input_products) > 0:
-                    batch_process(input_products, fileName, region)
+                    batch_process(input_products, fileName, region, dbTableName)
                 else:
                     logMessage(fileName, "No products could be found in bucket {}/{}".format(inputBucket, prefix), LOGTYPE_INFO)
 
@@ -126,14 +128,15 @@ def main():
     startTime = datetime.now()
     inputBucket = ""
     fileName = ""
-    region = "us-west-2"
+    region = "us-east-1"
     
     try:
         inputBucket = os.environ.get("InputBucket")
         fileName = os.environ.get("FileName")
         region = os.environ.get("Region")
+        DB_TABLE = os.environ.get("DBTableName")
         
-        logMessage(fileName, 'received ' + inputBucket + "  " + fileName + " from environment", LOGTYPE_INFO)
+        logMessage(fileName, 'received ' + inputBucket + "  " + fileName + "  " + DB_TABLE + " from environment", LOGTYPE_INFO)
     except:
         error = ''
 
@@ -143,18 +146,20 @@ def main():
             parser.add_argument("--bucketName", "-js", type=str, required=True)
             parser.add_argument("--fileName", "-js", type=str, required=True)
             parser.add_argument("--region", "-js", type=str, required=True)
+            parser.add_argument("--dbTableName", "-js", type=str, required=True)
             args = parser.parse_args()
 
             inputBucket = args.bucketName
             fileName = args.fileName
             region = args.region
+            DB_TABLE = args.dbTableName
             
-            logMessage(fileName, 'received ' + inputBucket + "  " + fileName +  "  " + region + " from params", LOGTYPE_INFO)
+            logMessage(fileName, 'received ' + inputBucket + "  " + fileName +  "  " + region +   "  " + DB_TABLE + " from params", LOGTYPE_INFO)
        
     except Exception as ex:
         logMessage(fileName, "Unexpected error:" + str(ex), LOGTYPE_ERROR)
         
-    process_files(inputBucket, fileName, region)
+    process_files(inputBucket, fileName, region, DB_TABLE)
 
     endTime = datetime.now()
     diffTime = endTime - startTime

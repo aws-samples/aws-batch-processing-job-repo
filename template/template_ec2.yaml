@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Orchestrating an Application Process with AWS Batch in Fargate using CloudFormation'
+Description: 'Orchestrating an Application Process with AWS Batch using CloudFormation'
 Parameters:
   StackName:
     Type: String
@@ -11,11 +11,9 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
   InternetGateway:
     Type: AWS::EC2::InternetGateway
-  PublicSubnetRouteTable:
+  RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
@@ -27,96 +25,34 @@ Resources:
         Ref: VPC
       InternetGatewayId:
         Ref: InternetGateway
-  NATEIP:
-    DependsOn: VPCGatewayAttachment
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc        
-  NATGateway:
-      DependsOn: VPCGatewayAttachment
-      Type: AWS::EC2::NatGateway
-      Properties:
-        AllocationId:
-          Fn::GetAtt:
-          - NATEIP
-          - AllocationId
-        SubnetId:
-          Ref: PublicSubnet    
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: EC2 Security Group for instances launched in the VPC by Batch
       VpcId:
         Ref: VPC
-  PublicSubnet:
+  Subnet:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock: 10.0.0.0/24
       VpcId:
         Ref: VPC
       MapPublicIpOnLaunch: 'True'
-      Tags:
-        - Key: Name
-          Value: !Sub ${StackName} Public Subnet  
-  PrivateSubnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: 10.0.1.0/24
-      VpcId:
-        Ref: VPC
-      Tags:
-        - Key: Name
-          Value: !Sub ${StackName} Private Subnet   
-  PublicSubnetRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId:
-        Ref: VPC
-      Tags:
-        - Key: Name
-          Value: !Sub ${StackName} Public Route        
-        - Key: Project
-          Value: AWS Batch in Fargate         
-  PublicSubnetRoute:
+  Route:
     Type: AWS::EC2::Route
-    DependsOn: VPCGatewayAttachment
     Properties:
-      RouteTableId: 
-        Ref: PublicSubnetRouteTable
+      RouteTableId:
+        Ref: RouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId:
         Ref: InternetGateway
-  PublicSubnetRouteTableAssociation:
+  SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId:
-        Ref: PublicSubnet
       RouteTableId:
-        Ref: PublicSubnetRouteTable
-  PrivateSubnetRouteTable:
-      Type: AWS::EC2::RouteTable
-      Properties:
-        VpcId:
-          Ref: VPC
-        Tags:
-          - Key: Name
-            Value: !Sub ${StackName} Private Route    
-          - Key: Project
-            Value: AWS Batch in Fargate                         
-  PrivateSubnetRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref 'PrivateSubnetRouteTable'
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId:
-        Ref: NATGateway
-  PrivateSubnetRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
+        Ref: RouteTable
       SubnetId:
-        Ref: PrivateSubnet
-      RouteTableId:
-        Ref: PrivateSubnetRouteTable        
+        Ref: Subnet
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -133,23 +69,12 @@ Resources:
         Version: 2012-10-17
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
         - arn:aws:iam::aws:policy/AWSBatchFullAccess
         - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
       Path: /
-      Policies:
-      - PolicyName: !Sub ${StackName}-lambda-s3-get-policy
-        PolicyDocument:
-          Statement:
-          - Effect: Allow
-            Action:
-              - 's3:Get*'
-              - 's3:List*'
-            Resource: '*'   
-            Resource: !Join
-              - ''
-              - - 'arn:aws:s3:::'
-                - !Sub "${StackName}-${AWS::AccountId}"
-                - /*             
   BatchServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -162,12 +87,30 @@ Resources:
           Action: sts:AssumeRole
       ManagedPolicyArns:
       - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
-                 
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: EcsInstanceRole
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+        - Sid: ''
+          Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
   BatchProcessingJobDefinition:
     Type: AWS::Batch::JobDefinition
     Properties:
       Type: container
-      PropagateTags: true
       JobDefinitionName: BatchJobDefinition
       ContainerProperties:
         Image:
@@ -177,94 +120,17 @@ Resources:
             - .dkr.ecr.
             - Ref: AWS::Region
             - !Sub '.amazonaws.com/${StackName}-repository:latest'
-        FargatePlatformConfiguration:
-          PlatformVersion: LATEST
-        ResourceRequirements:
-          - Value: 0.25
-            Type: VCPU
-          - Value: 512
-            Type: MEMORY
-        JobRoleArn:  !GetAtt 'BatchTaskExecutionRole.Arn'
-        ExecutionRoleArn:  !GetAtt 'BatchTaskExecutionRole.Arn'
-        LogConfiguration:
-          LogDriver:  awslogs
-          Options:
-            awslogs-group: !Ref 'BatchLogGroup'
-            awslogs-region: !Ref AWS::Region
-            awslogs-stream-prefix: !Sub ${StackName}-logs
+        Vcpus: 2
+        Memory: 2000
         Command:
         - python 
         - batch_processor.py
-      PlatformCapabilities:
-      - FARGATE
-      Tags:
-        Service: Batch
-        Name: JobDefinitionTag
-        Expected: MergeTag
-
-  BatchLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties: 
-      LogGroupName: !Sub ${StackName}-awslogs
-      RetentionInDays: 7
-  BatchTaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${StackName}-taskexec-role
-      AssumeRolePolicyDocument:
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service: [ecs-tasks.amazonaws.com]
-          Action: ['sts:AssumeRole']
-      Path: /
-      Policies:
-        - PolicyName: AmazonECSTaskExecutionRolePolicy
-          PolicyDocument:
-            Statement:
-            - Effect: Allow
-              Action:
-                - 'ecr:GetAuthorizationToken'
-                - 'ecr:BatchCheckLayerAvailability'
-                - 'ecr:GetDownloadUrlForLayer'
-                - 'ecr:BatchGetImage'
-                - 'logs:CreateLogStream'
-                - 'logs:PutLogEvents'
-              Resource: '*'
-        - PolicyName: !Sub ${StackName}-ecs-task-s3-get-policy
-          PolicyDocument:
-            Statement:
-            - Effect: Allow
-              Action:
-                - s3:PutObject
-                - s3:GetObject
-                - s3:ListBucket
-              Resource: 
-                - !Join
-                  - ''
-                  - - 'arn:aws:s3:::'
-                    - !Sub "${StackName}-${AWS::AccountId}"
-                - !Join
-                  - ''
-                  - - 'arn:aws:s3:::'
-                    - !Sub "${StackName}-${AWS::AccountId}"
-                    - /*
-        - PolicyName: !Sub ${StackName}-ecs-task-dynamo-policy
-          PolicyDocument:
-            Statement:
-            - Effect: Allow
-              Action:
-                - 'dynamodb:PutItem'
-              Resource: !Join
-                - ''
-                - - 'arn:aws:dynamodb:'
-                  - !Sub "${AWS::Region}:${AWS::AccountId}:table/${StackName}"
-              
+      RetryStrategy:
+        Attempts: 1
   BatchProcessingJobQueue:
     Type: AWS::Batch::JobQueue
     Properties:
       JobQueueName: !Sub "${StackName}-queue"
-      State: ENABLED
       Priority: 1
       ComputeEnvironmentOrder:
       - Order: 1
@@ -274,14 +140,20 @@ Resources:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
       Type: MANAGED
-      State: ENABLED
       ComputeResources:
-        Type: FARGATE
-        MaxvCpus: 40
+        Type: EC2
+        MinvCpus: 0
+        DesiredvCpus: 0
+        MaxvCpus: 32
+        InstanceTypes:
+        #- a1.medium
+        - optimal
         Subnets:
-        - Ref: PrivateSubnet
+        - Ref: Subnet
         SecurityGroupIds:
         - Ref: SecurityGroup
+        InstanceRole:
+          Ref: IamInstanceProfile
       ServiceRole:
         Ref: BatchServiceRole
   BatchProcessS3Bucket:
@@ -314,7 +186,7 @@ Resources:
       Environment:
         Variables:
           BATCH_JOB_QUEUE_NAME: !Sub "${StackName}-queue"
-          DYNAMO_TABLE_NAME: !Sub ${StackName}
+          DYNAMO_TABLE_NAME: !Sub ${StackName}      
       Role:
         Fn::GetAtt:
           - LambdaExecutionRole
@@ -494,6 +366,24 @@ Resources:
     Type: AWS::ECR::Repository
     Properties: 
       RepositoryName: !Sub ${StackName}-repository
+      RepositoryPolicyText: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal: 
+              AWS: 
+               - !Sub arn:aws:iam::${AWS::AccountId}:role/${EcsInstanceRole}
+            Action: 
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"
+  
   BatchProcessingDynamoDBTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -530,87 +420,7 @@ Resources:
       ProvisionedThroughput:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
-
-  #### VPC Endpoints
-  S3VPCEndpoint:
-    Type: "AWS::EC2::VPCEndpoint"
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName:
-        !Sub "com.amazonaws.${AWS::Region}.s3"
-      VpcId: !Ref VPC
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal: '*'
-            Action:
-              - 's3:*'
-            Resource:
-              - !Join
-                - ''
-                - - 'arn:aws:s3:::'
-                  - !Sub "${StackName}-${AWS::AccountId}"   
-
-  DynamoDBVPCEndpoint:
-    Type: "AWS::EC2::VPCEndpoint"
-    Properties:
-      RouteTableIds:
-        - !Ref PrivateSubnetRouteTable
-      ServiceName:
-        !Sub "com.amazonaws.${AWS::Region}.dynamodb"
-      VpcId: !Ref VPC
-      PolicyDocument:
-        Statement:
-        - Effect: Allow
-          Principal: '*'
-          Action:
-            - 'dynamodb:*'
-          Resource: !Join
-            - ''
-            - - 'arn:aws:dynamodb:'
-              - !Sub "${AWS::Region}:${AWS::AccountId}:table/${StackName}"                   
-
-  EcrApiVPCEndpoint:
-    Type: "AWS::EC2::VPCEndpoint"
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName:
-        !Sub "com.amazonaws.${AWS::Region}.ecr.api"
-      VpcId: !Ref VPC
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal: '*'
-            Action:
-              - 'ecr:*'
-            Resource:
-              - !Join
-                - ''
-                - - 'arn:aws:ecr:'
-                  - !Sub "${AWS::Region}:${AWS::AccountId}:repository/${StackName}"
-
-  EcrDkrVPCEndpoint:
-    Type: "AWS::EC2::VPCEndpoint"
-    Properties:
-      VpcEndpointType: Interface
-      ServiceName:
-        !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
-      VpcId: !Ref VPC
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal: '*'
-            Action:
-              - 'ecr:*'
-            Resource:
-              - !Join
-                - ''
-                - - 'arn:aws:ecr:'
-                  - !Sub "${AWS::Region}:${AWS::AccountId}:repository/${StackName}"           
-  
+       
 Outputs:
   ComputeEnvironmentArn:
     Value:
