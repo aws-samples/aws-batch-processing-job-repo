@@ -56,8 +56,7 @@ Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName:
-        Fn::Sub: lambda-role
+      RoleName: !Sub ${StackName}-lambda-role
       AssumeRolePolicyDocument:
         Statement:
           - Action:
@@ -111,7 +110,7 @@ Resources:
     Type: AWS::Batch::JobDefinition
     Properties:
       Type: container
-      JobDefinitionName: BatchJobDefinition
+      JobDefinitionName: !Sub ${StackName}-BatchJobDefinition
       ContainerProperties:
         Image:
           Fn::Join:
