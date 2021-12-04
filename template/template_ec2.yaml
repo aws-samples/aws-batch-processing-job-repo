@@ -110,7 +110,7 @@ Resources:
     Type: AWS::Batch::JobDefinition
     Properties:
       Type: container
-      JobDefinitionName: !Sub ${StackName}-BatchJobDefinition
+      JobDefinitionName: Ec2BatchJobDefinition
       ContainerProperties:
         Image:
           Fn::Join:
@@ -223,7 +223,7 @@ Resources:
 
               response = batch.submit_job(jobName=batch_job_queue_name, 
                                           jobQueue=batch_job_queue_name, 
-                                          jobDefinition='BatchJobDefinition', 
+                                          jobDefinition='Ec2BatchJobDefinition', 
                                           containerOverrides={
                                               "command": [ "python", "batch_processor.py", batchCommand  ],
                                               "environment": [ 

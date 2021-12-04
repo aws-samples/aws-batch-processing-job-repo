@@ -167,7 +167,7 @@ Resources:
     Properties:
       Type: container
       PropagateTags: true
-      JobDefinitionName: !Sub ${StackName}-BatchJobDefinition
+      JobDefinitionName: FargateBatchJobDefinition
       ContainerProperties:
         Image:
           Fn::Join:
@@ -351,7 +351,7 @@ Resources:
 
               response = batch.submit_job(jobName=batch_job_queue_name, 
                                           jobQueue=batch_job_queue_name, 
-                                          jobDefinition='BatchJobDefinition', 
+                                          jobDefinition='FargateBatchJobDefinition', 
                                           containerOverrides={
                                               "command": [ "python", "batch_processor.py", batchCommand  ],
                                               "environment": [ 
