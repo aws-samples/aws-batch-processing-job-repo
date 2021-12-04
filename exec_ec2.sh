@@ -1,6 +1,6 @@
 #!/bin/bash
 
-STACK_NAME=fargate-batch-job
+STACK_NAME=ec2-batch-job
 REGION=$(aws ec2 describe-availability-zones --output text --query 'AvailabilityZones[0].[RegionName]')
 ACCOUNT_NUMBER=$(aws sts get-caller-identity --query 'Account' --output text)
 
