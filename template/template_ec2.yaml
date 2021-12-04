@@ -56,8 +56,7 @@ Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName:
-        Fn::Sub: lambda-role
+      RoleName: !Sub ${StackName}-lambda-role
       AssumeRolePolicyDocument:
         Statement:
           - Action:
@@ -111,7 +110,7 @@ Resources:
     Type: AWS::Batch::JobDefinition
     Properties:
       Type: container
-      JobDefinitionName: BatchJobDefinition
+      JobDefinitionName: Ec2BatchJobDefinition
       ContainerProperties:
         Image:
           Fn::Join:
@@ -224,7 +223,7 @@ Resources:
 
               response = batch.submit_job(jobName=batch_job_queue_name, 
                                           jobQueue=batch_job_queue_name, 
-                                          jobDefinition='BatchJobDefinition', 
+                                          jobDefinition='Ec2BatchJobDefinition', 
                                           containerOverrides={
                                               "command": [ "python", "batch_processor.py", batchCommand  ],
                                               "environment": [ 

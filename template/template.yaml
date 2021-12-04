@@ -120,8 +120,7 @@ Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName:
-        Fn::Sub: lambda-role
+      RoleName: !Sub ${StackName}-lambda-role
       AssumeRolePolicyDocument:
         Statement:
           - Action:
@@ -168,7 +167,7 @@ Resources:
     Properties:
       Type: container
       PropagateTags: true
-      JobDefinitionName: BatchJobDefinition
+      JobDefinitionName: FargateBatchJobDefinition
       ContainerProperties:
         Image:
           Fn::Join:
@@ -352,7 +351,7 @@ Resources:
 
               response = batch.submit_job(jobName=batch_job_queue_name, 
                                           jobQueue=batch_job_queue_name, 
-                                          jobDefinition='BatchJobDefinition', 
+                                          jobDefinition='FargateBatchJobDefinition', 
                                           containerOverrides={
                                               "command": [ "python", "batch_processor.py", batchCommand  ],
                                               "environment": [ 
