@@ -308,7 +308,7 @@ Resources:
       FunctionName: !Sub "${StackName}-lambda"
       Description: Python Function Handler that would be triggered BY s3 events TO the aws batch
       Handler: index.lambda_handler
-      Runtime: python3.6
+      Runtime: python3.9
       MemorySize: 128
       Timeout: 30
       Environment:
