@@ -56,8 +56,7 @@ Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName:
-        Fn::Sub: lambda-role
+      RoleName: !Sub ${StackName}-lambda-role
       AssumeRolePolicyDocument:
         Statement:
           - Action:
@@ -111,7 +110,7 @@ Resources:
     Type: AWS::Batch::JobDefinition
     Properties:
       Type: container
-      JobDefinitionName: BatchJobDefinition
+      JobDefinitionName: !Sub ${StackName}-defn
       ContainerProperties:
         Image:
           Fn::Join:
@@ -185,6 +184,7 @@ Resources:
       Timeout: 30
       Environment:
         Variables:
+          BATCH_JOB_DEFN_NAME: !Sub "${StackName}-defn"
           BATCH_JOB_QUEUE_NAME: !Sub "${StackName}-queue"
           DYNAMO_TABLE_NAME: !Sub ${StackName}      
       Role:
@@ -213,6 +213,7 @@ Resources:
               batch = boto3.client('batch')
               region = batch.meta.region_name
 
+              batch_job_defn_name = os.environ["BATCH_JOB_DEFN_NAME"]
               batch_job_queue_name = os.environ["BATCH_JOB_QUEUE_NAME"]
               db_table_name  = os.environ["DYNAMO_TABLE_NAME"]
 
@@ -224,7 +225,7 @@ Resources:
 
               response = batch.submit_job(jobName=batch_job_queue_name, 
                                           jobQueue=batch_job_queue_name, 
-                                          jobDefinition='BatchJobDefinition', 
+                                          jobDefinition=batch_job_defn_name, 
                                           containerOverrides={
                                               "command": [ "python", "batch_processor.py", batchCommand  ],
                                               "environment": [ 
